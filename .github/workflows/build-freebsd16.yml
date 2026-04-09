@@ -76,40 +76,42 @@ jobs:
           sync_files: true
           run: |
             set -eux
-            export ASSUME_ALWAYS_YES=yes
-            pkg update
-            pkg install -y git ca_root_nss pkgconf poudriere-devel rsync
-
-            mkdir -p /usr/ports/security
-            rsync -a "${GITHUB_WORKSPACE}/security/pfSense-pkg-crowdsec/" /usr/ports/security/pfSense-pkg-crowdsec/
-
             HOST_CACHE="${GITHUB_WORKSPACE}/.cache/freebsd-${{ matrix.target.freebsd_major }}"
-            mkdir -p /usr/ports/distfiles /var/cache/pkg
+
+            sudo env ASSUME_ALWAYS_YES=yes pkg update
+            sudo env ASSUME_ALWAYS_YES=yes pkg install -y git ca_root_nss pkgconf poudriere-devel rsync
+
+            sudo mkdir -p /usr/ports/security
+            sudo rsync -a "${GITHUB_WORKSPACE}/security/pfSense-pkg-crowdsec/" /usr/ports/security/pfSense-pkg-crowdsec/
+            sudo chown -R runner /usr/ports/security/pfSense-pkg-crowdsec
+
+            sudo mkdir -p /usr/ports/distfiles /var/cache/pkg
             if [ -d "${HOST_CACHE}/distfiles" ] && [ "$(ls -A "${HOST_CACHE}/distfiles")" ]; then
-                rsync -a "${HOST_CACHE}/distfiles/" /usr/ports/distfiles/ || true
+                sudo rsync -a "${HOST_CACHE}/distfiles/" /usr/ports/distfiles/ || true
             fi
             if [ -d "${HOST_CACHE}/pkg" ] && [ "$(ls -A "${HOST_CACHE}/pkg")" ]; then
-                rsync -a "${HOST_CACHE}/pkg/" /var/cache/pkg/ || true
+                sudo rsync -a "${HOST_CACHE}/pkg/" /var/cache/pkg/ || true
             fi
 
             cd /usr/ports/security/pfSense-pkg-crowdsec
-            make clean package
+            sudo make clean package
 
             PKG_OUTPUT=/usr/ports/packages/All
             WORKDIR=/tmp/crowdsec-release
-            mkdir -p "${WORKDIR}/All"
-            cp "${PKG_OUTPUT}"/pfSense-pkg-crowdsec-*.pkg "${WORKDIR}/All/"
-            pkg fetch -d -o "${WORKDIR}" crowdsec crowdsec-firewall-bouncer
+            sudo mkdir -p "${WORKDIR}/All"
+            sudo cp "${PKG_OUTPUT}"/pfSense-pkg-crowdsec-*.pkg "${WORKDIR}/All/"
+            sudo pkg fetch -d -o "${WORKDIR}" crowdsec crowdsec-firewall-bouncer
 
             cd "${WORKDIR}/All"
-            ls -lh
+            sudo ls -lh
             TARFILE="${GITHUB_WORKSPACE}/freebsd-${{ matrix.target.freebsd_major }}-amd64.tar"
-            tar -czf "${TARFILE}" crowdsec-*.pkg crowdsec-firewall-bouncer-*.pkg pfSense-pkg-crowdsec-*.pkg
-            sha256 "${TARFILE}" > "${TARFILE}.sha256"
-            cp "${PKG_OUTPUT}"/pfSense-pkg-crowdsec-*.pkg "${GITHUB_WORKSPACE}/pfSense-pkg-crowdsec-${{ matrix.target.freebsd_major }}.pkg"
-            sha256 "${GITHUB_WORKSPACE}/pfSense-pkg-crowdsec-${{ matrix.target.freebsd_major }}.pkg" > "${GITHUB_WORKSPACE}/pfSense-pkg-crowdsec-${{ matrix.target.freebsd_major }}.pkg.sha256"
-            rsync -a /usr/ports/distfiles/ "${HOST_CACHE}/distfiles/" || true
-            rsync -a /var/cache/pkg/ "${HOST_CACHE}/pkg/" || true
+            sudo tar -czf "${TARFILE}" crowdsec-*.pkg crowdsec-firewall-bouncer-*.pkg pfSense-pkg-crowdsec-*.pkg
+            sudo sha256 "${TARFILE}" > "${TARFILE}.sha256"
+            sudo cp "${PKG_OUTPUT}"/pfSense-pkg-crowdsec-*.pkg "${GITHUB_WORKSPACE}/pfSense-pkg-crowdsec-${{ matrix.target.freebsd_major }}.pkg"
+            sudo sha256 "${GITHUB_WORKSPACE}/pfSense-pkg-crowdsec-${{ matrix.target.freebsd_major }}.pkg" > "${GITHUB_WORKSPACE}/pfSense-pkg-crowdsec-${{ matrix.target.freebsd_major }}.pkg.sha256"
+            sudo chown runner "${TARFILE}" "${TARFILE}.sha256" "${GITHUB_WORKSPACE}/pfSense-pkg-crowdsec-${{ matrix.target.freebsd_major }}.pkg" "${GITHUB_WORKSPACE}/pfSense-pkg-crowdsec-${{ matrix.target.freebsd_major }}.pkg.sha256"
+            sudo rsync -a /usr/ports/distfiles/ "${HOST_CACHE}/distfiles/" || true
+            sudo rsync -a /var/cache/pkg/ "${HOST_CACHE}/pkg/" || true
 
       - name: Stop custom image server (${{ matrix.target.label }})
         if: ${{ matrix.target.custom_image }}
