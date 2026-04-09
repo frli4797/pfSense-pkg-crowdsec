@@ -6,6 +6,12 @@ It is not installed from the official repositories, at least not yet, but you ar
 
 Please refer to the [detailed documentation](https://docs.crowdsec.net/docs/getting_started/install_crowdsec_pfsense/) to install or update it from a release archive.
 
+## Building for FreeBSD 16 / pfSense 25.11
+
+If you need a package that already includes the latest fixes from this fork (for example commit `a77ea2c5` to restore compatibility with the pfSense 25.11 / FreeBSD 16 preview), follow the step-by-step guide in [`docs/build-install-freebsd16.md`](docs/build-install-freebsd16.md).
+
+The document explains how to build the port locally, bundle it with the required `crowdsec` and `crowdsec-firewall-bouncer` packages, and install the resulting tarball with `install-crowdsec.sh --from <tarfile>`.
+
 It provides a basic UI with settings to configure the Security Engine and the Firewall Remediation Component (bouncer).
 
 Three types of configuration are supported:

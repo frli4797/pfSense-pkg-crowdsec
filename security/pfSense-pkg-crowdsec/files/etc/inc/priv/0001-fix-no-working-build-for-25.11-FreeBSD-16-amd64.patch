@@ -1,0 +1,51 @@
+From a77ea2c5b223eb621bae29c310a4ff014c19b85f Mon Sep 17 00:00:00 2001
+From: frli4797 <5780904+frli4797@users.noreply.github.com>
+Date: Tue, 10 Mar 2026 11:19:43 +0100
+Subject: [PATCH] fix: no working build for 25.11/FreeBSD:16:amd64 Fixes #121
+
+---
+ .../files/usr/local/pkg/crowdsec.inc                | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/security/pfSense-pkg-crowdsec/files/usr/local/pkg/crowdsec.inc b/security/pfSense-pkg-crowdsec/files/usr/local/pkg/crowdsec.inc
+index b867819..3e7b9c1 100644
+--- a/security/pfSense-pkg-crowdsec/files/usr/local/pkg/crowdsec.inc
++++ b/security/pfSense-pkg-crowdsec/files/usr/local/pkg/crowdsec.inc
+@@ -65,7 +65,9 @@ $crowdsec_aliases = array(
+  */
+ function crowdsec_config_migrate()
+ {
+-    parse_config(true);
++    if (function_exists('parse_config')) {
++        parse_config(true);
++    }
+     $cf = config_get_path('installedpackages/crowdsec/config/0', []);
+ 
+     // noop on fresh install
+@@ -156,8 +158,11 @@ function crowdsec_install()
+     // Prepare rc.conf.d variables
+     mwexec('sysrc -f /usr/local/etc/rc.conf.d/crowdsec crowdsec_machine_name=pfsense');
+     mwexec('sysrc -f /usr/local/etc/rc.conf.d/crowdsec_firewall crowdsec_firewall_name=pfsense-firewall');
++    
++    if (function_exists('parse_config')) {
++        parse_config(true);
++    }
+     // UPDATE pfSense ALIAS TABLES
+-    parse_config(true);
+     config_init_path(implode('/', ['aliases']));
+     $exist_aliases = config_get_path('aliases/alias', []);
+     $exist_aliases_names = array_column($exist_aliases, 'name');
+@@ -224,7 +229,9 @@ function crowdsec_deinstall()
+     // Delete aliases
+     global $crowdsec_aliases;
+     $delete_flag = false;
+-    parse_config(true);
++    if (function_exists('parse_config')) {
++        parse_config(true);
++    }
+     foreach ($crowdsec_aliases as $crowdsec_alias) {
+         $crowdsec_index = get_alias_index($crowdsec_alias['name']);
+         if ($crowdsec_index !== -1) {
+-- 
+2.53.0
+
