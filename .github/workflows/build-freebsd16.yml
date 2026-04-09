@@ -64,12 +64,7 @@ jobs:
           xz -d "$WORKDIR/$FILE_NAME"
           QCOW2="${FILE_NAME%.xz}"
           mv "$WORKDIR/$QCOW2" "$WORKDIR/custom.qcow2"
-          PORT=$((8000 + (RANDOM % 1000)))
-          cd "$WORKDIR"
-          nohup python3 -m http.server "$PORT" >/tmp/http-${{ matrix.target.freebsd_major }}.log 2>&1 &
-          echo $! > "$WORKDIR/http.pid"
-          echo "CUSTOM_IMAGE_URL=http://127.0.0.1:${PORT}/custom.qcow2" >> "$GITHUB_ENV"
-          echo "url=http://127.0.0.1:${PORT}/custom.qcow2" >> "$GITHUB_OUTPUT"
+          echo "path=$WORKDIR/custom.qcow2" >> "$GITHUB_OUTPUT"
 
       - name: Build and bundle packages (${{ matrix.target.label }})
         uses: cross-platform-actions/action@v0.30.0
@@ -77,7 +72,7 @@ jobs:
           operating_system: freebsd
           version: ${{ matrix.target.version }}
           architecture: x86-64
-          image_url: ${{ steps.prepare_custom_image.outputs.url }}
+          image: ${{ steps.prepare_custom_image.outputs.path }}
           sync_files: true
           run: |
             set -eux
