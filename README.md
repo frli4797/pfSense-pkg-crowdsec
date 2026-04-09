@@ -14,7 +14,7 @@ The document explains how to build the port locally, bundle it with the required
 
 ### CI-built artifacts
 
-If you prefer automation, enable the [`FreeBSD Package Matrix`](.github/workflows/build-freebsd16.yml) workflow in your fork. It boots the official FreeBSD 15.0-RELEASE VM image as well as the latest 16.0-CURRENT snapshot, runs the same port build/tarball steps, and publishes `freebsd-15-amd64.tar` plus `freebsd-16-amd64.tar` as downloadable artifacts. When you cut a GitHub Release, the workflow automatically attaches those tarballs alongside the rebuilt `pfSense-pkg-crowdsec-*.pkg` files to the release page.
+If you prefer automation, enable the [`FreeBSD Package Matrix`](.github/workflows/build-freebsd16.yml) workflow in your fork. It rebuilds the script-only `pfSense-pkg-crowdsec` port inside a supported FreeBSD 15.0 VM, publishes a native `freebsd-15-amd64.tar`, and then repacks the upstream `freebsd-16-amd64.tar` release bundle with that rebuilt `NO_ARCH` package so the latest fixes are available for pfSense 25.11 / FreeBSD 16 as well. When you cut a GitHub Release, the workflow automatically attaches both tarballs alongside the rebuilt `pfSense-pkg-crowdsec-*.pkg` files to the release page.
 
 ### Installing with a custom pfSense package
 

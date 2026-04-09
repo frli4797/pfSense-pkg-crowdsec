@@ -22,12 +22,9 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - label: "FreeBSD 15.0-RELEASE"
+          - label: "15.0"
             freebsd_major: "15"
-            release: "15.0-RELEASE"
-          - label: "FreeBSD 16.0-CURRENT"
-            freebsd_major: "16"
-            release: "16.0-CURRENT"
+            release: "15.0"
 
     steps:
       - name: Checkout repository
@@ -51,11 +48,12 @@ jobs:
         uses: vmactions/freebsd-vm@v1
         with:
           release: ${{ matrix.target.release }}
-          workdir: /root/workspace
+          usesh: true
+          sync: rsync
           prepare: pkg update -f && pkg install -y git ca_root_nss pkgconf poudriere-devel rsync
           run: |
             set -eux
-            WORKSPACE=/root/workspace
+            WORKSPACE="${GITHUB_WORKSPACE}"
             HOST_CACHE="${WORKSPACE}/.cache/freebsd-${{ matrix.target.freebsd_major }}"
 
             if [ ! -f /usr/ports/Mk/bsd.port.mk ]; then
@@ -103,9 +101,64 @@ jobs:
             pfSense-pkg-crowdsec-${{ matrix.target.freebsd_major }}.pkg
             pfSense-pkg-crowdsec-${{ matrix.target.freebsd_major }}.pkg.sha256
 
+  bundle_freebsd16:
+    name: Repack FreeBSD 16 release bundle
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download FreeBSD 15 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: freebsd-15-amd64
+          path: artifacts/freebsd-15
+
+      - name: Download upstream FreeBSD 16 bundle
+        run: |
+          set -eux
+          API_URL="https://api.github.com/repos/crowdsecurity/pfSense-pkg-crowdsec/releases/latest"
+          RELEASE_JSON=$(curl -fsSL "$API_URL")
+          ASSET_URL=$(printf '%s' "$RELEASE_JSON" | tr ',' '\n' | grep '"browser_download_url":' | grep '/freebsd-16-amd64.tar"' | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/' | head -n 1)
+          if [ -z "$ASSET_URL" ]; then
+            echo "Unable to locate freebsd-16-amd64.tar in the upstream release assets."
+            exit 1
+          fi
+          curl -fsSL "$ASSET_URL" -o freebsd-16-amd64.upstream.tar
+
+      - name: Repack FreeBSD 16 artifact with rebuilt pfSense package
+        run: |
+          set -eux
+          WORKDIR=$(mktemp -d)
+          trap 'rm -rf "$WORKDIR"' EXIT
+
+          tar -xzf freebsd-16-amd64.upstream.tar -C "$WORKDIR"
+          find "$WORKDIR" -maxdepth 1 -name 'pfSense-pkg-crowdsec-[0-9]*.pkg' -delete
+
+          # The pfSense package contains only scripts and static assets, so the
+          # NO_ARCH package rebuilt on 15.0 can be reused inside the 16 bundle.
+          cp artifacts/freebsd-15/pfSense-pkg-crowdsec-15.pkg "$WORKDIR/pfSense-pkg-crowdsec-16.pkg"
+
+          (
+            cd "$WORKDIR"
+            tar -czf "$GITHUB_WORKSPACE/freebsd-16-amd64.tar" crowdsec-*.pkg crowdsec-firewall-bouncer-*.pkg pfSense-pkg-crowdsec-*.pkg
+          )
+
+          sha256sum freebsd-16-amd64.tar | awk '{print $1 "  freebsd-16-amd64.tar"}' > freebsd-16-amd64.tar.sha256
+          cp artifacts/freebsd-15/pfSense-pkg-crowdsec-15.pkg pfSense-pkg-crowdsec-16.pkg
+          sha256sum pfSense-pkg-crowdsec-16.pkg | awk '{print $1 "  pfSense-pkg-crowdsec-16.pkg"}' > pfSense-pkg-crowdsec-16.pkg.sha256
+
+      - name: Upload artifact (FreeBSD 16)
+        uses: actions/upload-artifact@v4
+        with:
+          name: freebsd-16-amd64
+          path: |
+            freebsd-16-amd64.tar
+            freebsd-16-amd64.tar.sha256
+            pfSense-pkg-crowdsec-16.pkg
+            pfSense-pkg-crowdsec-16.pkg.sha256
+
   release:
     name: Publish GitHub Release assets
-    needs: build
+    needs: [build, bundle_freebsd16]
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     permissions:

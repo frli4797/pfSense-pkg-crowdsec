@@ -17,6 +17,7 @@ RUN_DEPENDS=	crowdsec>=1.6.3:security/crowdsec \
 
 NO_BUILD=	yes
 NO_MTREE=	yes
+NO_ARCH=	yes
 
 SUB_FILES=	pkg-install pkg-deinstall
 SUB_LIST=	PORTNAME=${PORTNAME}
