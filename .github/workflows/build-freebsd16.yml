@@ -50,7 +50,7 @@ jobs:
           release: ${{ matrix.target.release }}
           usesh: true
           sync: rsync
-          prepare: pkg update -f && pkg install -y git ca_root_nss pkgconf poudriere-devel rsync
+          prepare: pkg update -f && pkg install -y git ca_root_nss pkgconf poudriere-devel rsync crowdsec crowdsec-firewall-bouncer
           run: |
             set -eux
             WORKSPACE="${GITHUB_WORKSPACE}"
@@ -73,7 +73,8 @@ jobs:
             fi
 
             cd /usr/ports/security/pfSense-pkg-crowdsec
-            make clean package
+            # Keep dependency resolution non-interactive inside CI.
+            env BATCH=yes make clean package
 
             PKG_OUTPUT=/usr/ports/packages/All
             WORKDIR=/tmp/crowdsec-release
