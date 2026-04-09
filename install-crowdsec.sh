@@ -149,6 +149,91 @@ get_archive() {
     download "$ASSET_URL" > "$TARFILE"
 }
 
+verify_override_checksum() {
+    local target_file="$1"
+    if [ -z "$PFSENSE_OVERRIDE_SHA256" ]; then
+        return
+    fi
+
+    if [ ! -f "$target_file" ]; then
+        echo "Error: Override package file $target_file not found for checksum verification."
+        exit 1
+    fi
+
+    local expected actual
+    expected=$(echo "$PFSENSE_OVERRIDE_SHA256" | tr '[:upper:]' '[:lower:]')
+
+    if command -v sha256sum > /dev/null 2>&1; then
+        actual=$(sha256sum "$target_file" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+    elif command -v sha256 > /dev/null 2>&1; then
+        actual=$(sha256 -q "$target_file" | tr '[:upper:]' '[:lower:]')
+    else
+        echo "Error: Neither sha256 nor sha256sum is available to verify the override package."
+        exit 1
+    fi
+
+    if [ "$expected" != "$actual" ]; then
+        echo "Error: Override package checksum mismatch."
+        echo "Expected: $expected"
+        echo "Actual:   $actual"
+        exit 1
+    fi
+
+    echo "Override package checksum verified ($actual)."
+}
+
+download_override_package() {
+    local dest_dir="$1"
+    if [ -z "$PFSENSE_OVERRIDE_URL" ] && [ -z "$PFSENSE_OVERRIDE_REPO" ]; then
+        return
+    fi
+
+    mkdir -p "$dest_dir"
+    if [ -n "$PFSENSE_OVERRIDE_URL" ]; then
+        local override_name override_path
+        override_name=$(basename "$PFSENSE_OVERRIDE_URL")
+        override_path="$dest_dir/$override_name"
+        echo "Downloading override pfSense package from $PFSENSE_OVERRIDE_URL"
+        download "$PFSENSE_OVERRIDE_URL" > "$override_path"
+        PFSENSE_PKG_OVERRIDE_FILE="$override_path"
+        verify_override_checksum "$override_path"
+        return
+    fi
+
+    local override_owner override_repo
+    override_owner="${PFSENSE_OVERRIDE_REPO%/*}"
+    override_repo="${PFSENSE_OVERRIDE_REPO#*/}"
+    if [ -z "$override_owner" ] || [ -z "$override_repo" ] || [ "$override_owner" = "$override_repo" ]; then
+        echo "Error: --pkg-override-repo must be in owner/repo format."
+        exit 1
+    fi
+
+    local release_selector
+    release_selector="latest"
+    if [ -n "$PFSENSE_OVERRIDE_RELEASE" ]; then
+        release_selector="tags/$PFSENSE_OVERRIDE_RELEASE"
+    fi
+
+    local api_url override_release_json override_asset_url override_name override_path
+    api_url="https://api.github.com/repos/$override_owner/$override_repo/releases/$release_selector"
+    echo "Looking up override repository $override_owner/$override_repo ($release_selector)"
+    override_release_json=$(download "$api_url")
+
+    override_asset_url=$(echo "$override_release_json" | tr ',' '\n' | grep '"browser_download_url":' | grep 'pfSense-pkg-crowdsec-' | grep '.pkg"' | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/' | head -n 1)
+
+    if [ -z "$override_asset_url" ]; then
+        echo "Error: Unable to find pfSense package asset in override repo."
+        exit 1
+    fi
+
+    override_name=$(basename "$override_asset_url")
+    override_path="$dest_dir/$override_name"
+    echo "Downloading override pfSense package asset: $override_name"
+    download "$override_asset_url" > "$override_path"
+    PFSENSE_PKG_OVERRIDE_FILE="$override_path"
+    verify_override_checksum "$override_path"
+}
+
 
 install_packages() {
     if ! command -v pkg > /dev/null; then
@@ -170,6 +255,10 @@ install_packages() {
     echo "Extracting archive to $TMP_DIR"
     tar -xzf "$TARFILE" -C "$TMP_DIR"
 
+    if [ -n "$PFSENSE_OVERRIDE_URL" ] || [ -n "$PFSENSE_OVERRIDE_REPO" ]; then
+        download_override_package "$TMP_DIR"
+    fi
+
     # Versions that are distributed with dynamically linked abseil/re2 are not recommended to avoid dependency issues
     if find "$TMP_DIR" -name "abseil-[0-9]*.pkg" | grep -q .; then
         echo "Error: This archive contains an 'abseil' package. Installing it could replace the pfSense-managed abseil and break dependencies."
@@ -186,7 +275,12 @@ install_packages() {
     PKG_PATHS=""
     for package in $PKG_NAMES; do
         # match a digit from the version to avoid matching other packages too
-        PKG_PATH=$(find "$TMP_DIR" -name "$package-[0-9]*.pkg")
+        if [ "$package" = "pfSense-pkg-crowdsec" ] && [ -n "$PFSENSE_PKG_OVERRIDE_FILE" ]; then
+            PKG_PATH="$PFSENSE_PKG_OVERRIDE_FILE"
+            echo "   (override) $(basename "$PKG_PATH")"
+        else
+            PKG_PATH=$(find "$TMP_DIR" -name "$package-[0-9]*.pkg")
+        fi
         if [ -n "$PKG_PATH" ]; then
             echo " - $(basename "$PKG_PATH")"
             PKG_PATHS="$PKG_PATHS $PKG_PATH"
@@ -316,6 +410,11 @@ RELEASE_TAG=""
 ARCH=""
 FREEBSD_VERSION=""
 TARFILE=""
+PFSENSE_OVERRIDE_REPO=""
+PFSENSE_OVERRIDE_RELEASE=""
+PFSENSE_OVERRIDE_URL=""
+PFSENSE_PKG_OVERRIDE_FILE=""
+PFSENSE_OVERRIDE_SHA256=""
 
 
 check_deps
@@ -344,13 +443,33 @@ while [ $# -gt 0 ]; do
             shift
             exit 0
             ;;
+        --pkg-override-repo)
+            PFSENSE_OVERRIDE_REPO="$2"
+            shift
+            ;;
+        --pkg-override-release)
+            PFSENSE_OVERRIDE_RELEASE="$2"
+            shift
+            ;;
+        --pkg-override-url)
+            PFSENSE_OVERRIDE_URL="$2"
+            shift
+            ;;
+        --pkg-override-sha256)
+            PFSENSE_OVERRIDE_SHA256="$2"
+            shift
+            ;;
         *)
-            echo "Usage: $0 [--release <version>] [--arch <architecture>] [--freebsd <version>] | [--from <tarfile>] | --uninstall"
+            echo "Usage: $0 [--release <version>] [--arch <architecture>] [--freebsd <version>] [--pkg-override-repo owner/repo] [--pkg-override-release tag] [--pkg-override-url url] [--pkg-override-sha256 checksum] | [--from <tarfile>] | --uninstall"
             exit 1
             ;;
     esac
     shift
 done
+
+if [ -n "$PFSENSE_OVERRIDE_REPO" ] && [ -z "$PFSENSE_OVERRIDE_RELEASE" ] && [ -n "$RELEASE_TAG" ]; then
+    PFSENSE_OVERRIDE_RELEASE="$RELEASE_TAG"
+fi
 
 echo "#----------------------------------------------------------------#"
 echo "# This script is intended to be used only if the CrowdSec        #"
