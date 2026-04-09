@@ -20,6 +20,10 @@ If you prefer automation, enable the [`FreeBSD Package Matrix`](.github/workflow
 
 `install-crowdsec.sh` now accepts `--pkg-override-repo <owner/repo>` (and optionally `--pkg-override-release <tag>`, `--pkg-override-url <direct .pkg>`, or `--pkg-override-sha256 <checksum>`) so you can download `pfSense-pkg-crowdsec` from this fork while still fetching the other packages from the upstream release bundle and verifying the override against a published SHA-256.
 
+### Downloading CI logs locally
+
+Run `scripts/fetch-gh-logs.sh [run-id]` to pull the latest (or specified) GitHub Actions logs via the `gh` CLI. Logs are saved under `debug-logs/run-<id>/` and are ignored by git so you can review failures locally without polluting commits.
+
 It provides a basic UI with settings to configure the Security Engine and the Firewall Remediation Component (bouncer).
 
 Three types of configuration are supported:

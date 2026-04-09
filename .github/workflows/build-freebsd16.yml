@@ -24,13 +24,14 @@ jobs:
         target:
           - label: "FreeBSD 15.0-RELEASE"
             freebsd_major: "15"
-            version: "14.3"
-            custom_image: true
+            version: "15.0"
+            custom_image: false
             upstream_image: https://download.freebsd.org/releases/VM-IMAGES/15.0-RELEASE/amd64/Latest/FreeBSD-15.0-RELEASE-amd64-ufs.qcow2.xz
           - label: "FreeBSD 16.0-CURRENT"
             freebsd_major: "16"
-            version: "14.3"
+            version: "15.0"
             custom_image: true
+            base_version: "15.0"
             upstream_image: https://download.freebsd.org/snapshots/VM-IMAGES/16.0-CURRENT/amd64/Latest/FreeBSD-16.0-CURRENT-amd64-ufs.qcow2.xz
 
     steps:
@@ -64,15 +65,15 @@ jobs:
           xz -d "$WORKDIR/$FILE_NAME"
           QCOW2="${FILE_NAME%.xz}"
           mv "$WORKDIR/$QCOW2" "$WORKDIR/custom.qcow2"
-          echo "path=$WORKDIR/custom.qcow2" >> "$GITHUB_OUTPUT"
+          echo "url=file://$WORKDIR/custom.qcow2" >> "$GITHUB_OUTPUT"
 
       - name: Build and bundle packages (${{ matrix.target.label }})
         uses: cross-platform-actions/action@v0.30.0
         with:
           operating_system: freebsd
-          version: ${{ matrix.target.version }}
+          version: ${{ matrix.target.base_version || matrix.target.version }}
           architecture: x86-64
-          image: ${{ steps.prepare_custom_image.outputs.path }}
+          image_url: ${{ matrix.target.custom_image && steps.prepare_custom_image.outputs.url || matrix.target.upstream_image }}
           sync_files: true
           run: |
             set -eux
@@ -80,6 +81,11 @@ jobs:
 
             sudo env ASSUME_ALWAYS_YES=yes pkg update
             sudo env ASSUME_ALWAYS_YES=yes pkg install -y git ca_root_nss pkgconf poudriere-devel rsync
+
+            if [ ! -f /usr/ports/Mk/bsd.port.mk ]; then
+                sudo mkdir -p /usr/ports
+                sudo git clone --depth 1 https://git.FreeBSD.org/ports.git /usr/ports
+            fi
 
             sudo mkdir -p /usr/ports/security
             sudo rsync -a "${GITHUB_WORKSPACE}/security/pfSense-pkg-crowdsec/" /usr/ports/security/pfSense-pkg-crowdsec/
