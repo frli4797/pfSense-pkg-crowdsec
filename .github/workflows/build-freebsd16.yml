@@ -24,14 +24,10 @@ jobs:
         target:
           - label: "FreeBSD 15.0-RELEASE"
             freebsd_major: "15"
-            base_version: "14.3"
-            custom_image: true
-            upstream_image: https://download.freebsd.org/releases/VM-IMAGES/15.0-RELEASE/amd64/Latest/FreeBSD-15.0-RELEASE-amd64-ufs.qcow2.xz
+            release: "15.0-RELEASE"
           - label: "FreeBSD 16.0-CURRENT"
             freebsd_major: "16"
-            base_version: "14.3"
-            custom_image: true
-            upstream_image: https://download.freebsd.org/snapshots/VM-IMAGES/16.0-CURRENT/amd64/Latest/FreeBSD-16.0-CURRENT-amd64-ufs.qcow2.xz
+            release: "16.0-CURRENT"
 
     steps:
       - name: Checkout repository
@@ -51,84 +47,51 @@ jobs:
           key: freebsd-cache-${{ matrix.target.freebsd_major }}-${{ github.ref_name }}-${{ hashFiles('security/pfSense-pkg-crowdsec/**') }}
           restore-keys: |
             freebsd-cache-${{ matrix.target.freebsd_major }}-
-
-      - name: Prepare custom FreeBSD image (${{ matrix.target.label }})
-        if: ${{ matrix.target.custom_image }}
-        id: prepare_custom_image
-        run: |
-          set -eux
-          WORKDIR="$RUNNER_TEMP/freebsd-${{ matrix.target.freebsd_major }}"
-          mkdir -p "$WORKDIR"
-          FILE_NAME=$(basename "${{ matrix.target.upstream_image }}")
-          curl -L "${{ matrix.target.upstream_image }}" -o "$WORKDIR/$FILE_NAME"
-          xz -d "$WORKDIR/$FILE_NAME"
-          QCOW2="${FILE_NAME%.xz}"
-          mv "$WORKDIR/$QCOW2" "$WORKDIR/custom.qcow2"
-          PORT=$((8000 + (RANDOM % 1000)))
-          cd "$WORKDIR"
-          nohup python3 -m http.server "$PORT" --bind 127.0.0.1 >/tmp/http-${{ matrix.target.freebsd_major }}.log 2>&1 &
-          echo $! > "$WORKDIR/http.pid"
-          echo "url=http://127.0.0.1:${PORT}/custom.qcow2" >> "$GITHUB_OUTPUT"
-
       - name: Build and bundle packages (${{ matrix.target.label }})
-        uses: cross-platform-actions/action@v0.30.0
+        uses: vmactions/freebsd-vm@v1
         with:
-          operating_system: freebsd
-          version: ${{ matrix.target.base_version }}
-          architecture: x86-64
-          image_url: ${{ steps.prepare_custom_image.outputs.url }}
-          sync_files: true
+          release: ${{ matrix.target.release }}
+          workdir: /root/workspace
+          prepare: pkg update -f && pkg install -y git ca_root_nss pkgconf poudriere-devel rsync
           run: |
             set -eux
-            HOST_CACHE="${GITHUB_WORKSPACE}/.cache/freebsd-${{ matrix.target.freebsd_major }}"
-
-            sudo env ASSUME_ALWAYS_YES=yes pkg update
-            sudo env ASSUME_ALWAYS_YES=yes pkg install -y git ca_root_nss pkgconf poudriere-devel rsync
+            WORKSPACE=/root/workspace
+            HOST_CACHE="${WORKSPACE}/.cache/freebsd-${{ matrix.target.freebsd_major }}"
 
             if [ ! -f /usr/ports/Mk/bsd.port.mk ]; then
-                sudo mkdir -p /usr/ports
-                sudo git clone --depth 1 https://git.FreeBSD.org/ports.git /usr/ports
+                mkdir -p /usr/ports
+                git clone --depth 1 https://git.FreeBSD.org/ports.git /usr/ports
             fi
 
-            sudo mkdir -p /usr/ports/security
-            sudo rsync -a "${GITHUB_WORKSPACE}/security/pfSense-pkg-crowdsec/" /usr/ports/security/pfSense-pkg-crowdsec/
-            sudo chown -R runner /usr/ports/security/pfSense-pkg-crowdsec
+            mkdir -p /usr/ports/security
+            rsync -a "${WORKSPACE}/security/pfSense-pkg-crowdsec/" /usr/ports/security/pfSense-pkg-crowdsec/
 
-            sudo mkdir -p /usr/ports/distfiles /var/cache/pkg
-            if [ -d "${HOST_CACHE}/distfiles" ] && [ "$(ls -A "${HOST_CACHE}/distfiles")" ]; then
-                sudo rsync -a "${HOST_CACHE}/distfiles/" /usr/ports/distfiles/ || true
+            mkdir -p /usr/ports/distfiles /var/cache/pkg
+            if [ -d "${HOST_CACHE}/distfiles" ] && [ "$(ls -A "${HOST_CACHE}/distfiles" || true)" ]; then
+                rsync -a "${HOST_CACHE}/distfiles/" /usr/ports/distfiles/ || true
             fi
-            if [ -d "${HOST_CACHE}/pkg" ] && [ "$(ls -A "${HOST_CACHE}/pkg")" ]; then
-                sudo rsync -a "${HOST_CACHE}/pkg/" /var/cache/pkg/ || true
+            if [ -d "${HOST_CACHE}/pkg" ] && [ "$(ls -A "${HOST_CACHE}/pkg" || true)" ]; then
+                rsync -a "${HOST_CACHE}/pkg/" /var/cache/pkg/ || true
             fi
 
             cd /usr/ports/security/pfSense-pkg-crowdsec
-            sudo make clean package
+            make clean package
 
             PKG_OUTPUT=/usr/ports/packages/All
             WORKDIR=/tmp/crowdsec-release
-            sudo mkdir -p "${WORKDIR}/All"
-            sudo cp "${PKG_OUTPUT}"/pfSense-pkg-crowdsec-*.pkg "${WORKDIR}/All/"
-            sudo pkg fetch -d -o "${WORKDIR}" crowdsec crowdsec-firewall-bouncer
+            mkdir -p "${WORKDIR}/All"
+            cp "${PKG_OUTPUT}"/pfSense-pkg-crowdsec-*.pkg "${WORKDIR}/All/"
+            pkg fetch -d -o "${WORKDIR}" crowdsec crowdsec-firewall-bouncer
 
             cd "${WORKDIR}/All"
-            sudo ls -lh
-            TARFILE="${GITHUB_WORKSPACE}/freebsd-${{ matrix.target.freebsd_major }}-amd64.tar"
-            sudo tar -czf "${TARFILE}" crowdsec-*.pkg crowdsec-firewall-bouncer-*.pkg pfSense-pkg-crowdsec-*.pkg
-            sudo sha256 "${TARFILE}" > "${TARFILE}.sha256"
-            sudo cp "${PKG_OUTPUT}"/pfSense-pkg-crowdsec-*.pkg "${GITHUB_WORKSPACE}/pfSense-pkg-crowdsec-${{ matrix.target.freebsd_major }}.pkg"
-            sudo sha256 "${GITHUB_WORKSPACE}/pfSense-pkg-crowdsec-${{ matrix.target.freebsd_major }}.pkg" > "${GITHUB_WORKSPACE}/pfSense-pkg-crowdsec-${{ matrix.target.freebsd_major }}.pkg.sha256"
-            sudo chown runner "${TARFILE}" "${TARFILE}.sha256" "${GITHUB_WORKSPACE}/pfSense-pkg-crowdsec-${{ matrix.target.freebsd_major }}.pkg" "${GITHUB_WORKSPACE}/pfSense-pkg-crowdsec-${{ matrix.target.freebsd_major }}.pkg.sha256"
-            sudo rsync -a /usr/ports/distfiles/ "${HOST_CACHE}/distfiles/" || true
-            sudo rsync -a /var/cache/pkg/ "${HOST_CACHE}/pkg/" || true
-
-      - name: Stop custom image server (${{ matrix.target.label }})
-        if: ${{ matrix.target.custom_image }}
-        run: |
-          SERVER_DIR="$RUNNER_TEMP/freebsd-${{ matrix.target.freebsd_major }}"
-          if [ -f "$SERVER_DIR/http.pid" ]; then
-            kill "$(cat "$SERVER_DIR/http.pid")" || true
-          fi
+            ls -lh
+            TARFILE="${WORKSPACE}/freebsd-${{ matrix.target.freebsd_major }}-amd64.tar"
+            tar -czf "${TARFILE}" crowdsec-*.pkg crowdsec-firewall-bouncer-*.pkg pfSense-pkg-crowdsec-*.pkg
+            sha256 "${TARFILE}" > "${TARFILE}.sha256"
+            cp "${PKG_OUTPUT}"/pfSense-pkg-crowdsec-*.pkg "${WORKSPACE}/pfSense-pkg-crowdsec-${{ matrix.target.freebsd_major }}.pkg"
+            sha256 "${WORKSPACE}/pfSense-pkg-crowdsec-${{ matrix.target.freebsd_major }}.pkg" > "${WORKSPACE}/pfSense-pkg-crowdsec-${{ matrix.target.freebsd_major }}.pkg.sha256"
+            rsync -a /usr/ports/distfiles/ "${HOST_CACHE}/distfiles/" || true
+            rsync -a /var/cache/pkg/ "${HOST_CACHE}/pkg/" || true
 
       - name: Upload artifact (${{ matrix.target.label }})
         uses: actions/upload-artifact@v4
